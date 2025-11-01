@@ -1,9 +1,5 @@
-# Ignora i file Python bytecode
-*.pyc
-__pycache__/
 
 # Ignora i file Jupyter notebook checkpoints
 .ipynb_checkpoints/
 
-# Ignora cartelle di output
-outputs/
+
