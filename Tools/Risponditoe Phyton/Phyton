@@ -1,0 +1,118 @@
+# Importazioni
+from dotenv import load_dotenv
+from IPython.display import Markdown, display, update_display
+from openai import OpenAI
+import ollama
+
+# Costanti
+MODELLO_GPT = 'gpt-4o-mini'
+MODELLO_LLAMA = 'gpt-oss:20b'
+
+# Configurazione dell'ambiente
+load_dotenv()
+openai = OpenAI()
+
+# Funzioni
+
+def carica_risposta_gpt(messages):
+    """
+    Funzione per ottenere la risposta dal modello GPT-4 con streaming.
+    """
+    risposta = ""
+    try:
+        # Richiesta con streaming
+        stream = openai.chat.completions.create(model=MODELLO_GPT, messages=messages, stream=True)
+        display_handle = display(Markdown(""), display_id=True)
+        for chunk in stream:
+            risposta += chunk.choices[0].delta.content or ''
+            risposta = risposta.replace("```", "").replace("markdown", "")
+            update_display(Markdown(risposta), display_id=display_handle.display_id)
+    except Exception as e:
+        print(f"Errore durante la richiesta a GPT-4: {e}")
+    return risposta
+
+def carica_risposta_llama(messages):
+    """
+    Funzione per ottenere la risposta dal modello Llama (gpt-oss:20b).
+    """
+    try:
+        risposta = ollama.chat(model=MODELLO_LLAMA, messages=messages)
+        return risposta['message']['content']
+    except Exception as e:
+        print(f"Errore durante la richiesta a Llama: {e}")
+        return None
+
+def mostra_risposta(risposta):
+    """
+    Funzione per visualizzare la risposta in formato Markdown.
+    """
+    if risposta:
+        display(Markdown(risposta))
+    else:
+        display(Markdown("Si è verificato un errore nel recupero della risposta."))
+
+def raccogli_domanda():
+    """
+    Funzione per raccogliere la domanda dell'utente.
+    """
+    domanda = input("Per favore, inserisci la tua domanda:\n")
+    if not domanda.strip():  # Verifica se l'input è vuoto
+        print("Errore: la domanda non può essere vuota.")
+        return raccogli_domanda()  # Chiede di nuovo la domanda
+    return domanda
+
+def scegli_modello():
+    """
+    Funzione per scegliere quale modello usare per primo.
+    """
+    scelta = input("Quale modello vuoi usare per primo? (1 = OpenAI, 2 = Ollama): ")
+    if scelta.strip() == "1":
+        return "openai"
+    elif scelta.strip() == "2":
+        return "ollama"
+    else:
+        print("Scelta non valida. Riprova.")
+        return scegli_modello()
+
+# Logica principale
+
+def esegui():
+    """
+    Funzione principale per eseguire l'interazione con i modelli.
+    """
+    # Raccogli la domanda dell'utente
+    my_question = raccogli_domanda()
+
+    # Prompt di sistema e utente
+    prompt_sistema = "Sei un tutor tecnico utile che risponde a domande su codice Python, ingegneria del software, scienza dei dati e LLM"
+    prompt_utente = "Per favore, fornisci una spiegazione dettagliata della seguente domanda: " + my_question
+
+    # Messaggi per i modelli
+    messaggi = [
+        {"role": "system", "content": prompt_sistema},
+        {"role": "user", "content": prompt_utente}
+    ]
+    
+    # Chiedi quale modello usare per primo
+    scelta_modello = scegli_modello()
+
+    if scelta_modello == "openai":
+        print("\nRisposta da GPT‑4 / OpenAI:")
+        risposta_gpt = carica_risposta_gpt(messaggi)
+        mostra_risposta(risposta_gpt)
+        
+        print("\nRisposta da Llama / Ollama:")
+        risposta_llama = carica_risposta_llama(messaggi)
+        mostra_risposta(risposta_llama)
+        
+    else:  # Se la scelta è Ollama
+        print("\nRisposta da Llama / Ollama:")
+        risposta_llama = carica_risposta_llama(messaggi)
+        mostra_risposta(risposta_llama)
+        
+        print("\nRisposta da GPT‑4 / OpenAI:")
+        risposta_gpt = carica_risposta_gpt(messaggi)
+        mostra_risposta(risposta_gpt)
+
+# Esegui il programma
+esegui()
