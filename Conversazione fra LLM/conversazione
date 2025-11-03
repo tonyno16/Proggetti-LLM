@@ -1,132 +1,104 @@
 import os
-from dotenv import load_dotenv
+import time
 from openai import OpenAI
 import anthropic
-from IPython.display import Markdown, display, update_display
-import google.generativeai
+import google.generativeai as genai
+import gradio as gr
+from dotenv import load_dotenv
 
-# Caricamento delle variabili di ambiente da .env
+# Carica variabili d'ambiente
 load_dotenv()
+
 openai_api_key = os.getenv('OPENAI_API_KEY')
 anthropic_api_key = os.getenv('ANTHROPIC_API_KEY')
 google_api_key = os.getenv('GOOGLE_API_KEY')
 
-# Verifica delle chiavi API
+# Debug sulle chiavi
 if openai_api_key:
-    print(f"OpenAI API Key esistente: {openai_api_key[:8]}")
+    print(f"OpenAI API Key exists and starts with {openai_api_key[:8]}")
 else:
-    print("OpenAI API Key non configurata")
-    
+    print("OpenAI API Key not configured")
+
 if anthropic_api_key:
-    print(f"Anthropic API Key esistente: {anthropic_api_key[:7]}")
+    print(f"Anthropic API Key exists and starts with {anthropic_api_key[:7]}")
 else:
-    print("Anthropic API Key non configurata")
+    print("Anthropic API Key not configured")
 
 if google_api_key:
-    print(f"Google API Key esistente: {google_api_key[:8]}")
+    print(f"Google API Key exists and starts with {google_api_key[:8]}")
 else:
-    print("Google API Key non configurata")
+    print("Google API Key not configured")
 
-# Inizializzazione dei modelli
-openai = OpenAI()
-claude = anthropic.Anthropic()
-google.generativeai.configure()
+# Inizializzazione API
+openai = OpenAI(api_key=openai_api_key)
+claude = anthropic.Anthropic(api_key=anthropic_api_key)
+genai.configure(api_key=google_api_key)
 
-gpt_model = "gpt-4o-mini"
-claude_model = "claude-haiku-4-5-20251001"
-gemini_model = "gemini-2.5-flash"
+system_message = "Sei un assistente virtuale"
 
-# Istruzioni di sistema per ciascun modello
-gpt_system = "Sei un chatbot molto argomentativo; non sei d'accordo con niente e metti in discussione tutto in modo sarcastico."
-claude_system = "Sei un chatbot molto educato e cortese, cerchi di essere sempre d'accordo e calmare la situazione se qualcuno discute."
-gemini_system = "Sei un assistente un po' confuso che non capisce bene l'italiano e mescola parole in italiano e inglese."
+def stream_gpt(prompt):
+    messages = [
+        {"role": "system", "content": system_message},
+        {"role": "user", "content": prompt}
+    ]
+    stream = openai.chat.completions.create(
+        model='gpt-4o-mini',
+        messages=messages,
+        stream=True
+    )
+    result = ""
+    for chunk in stream:
+        result += chunk.choices[0].delta.content or ""
+        yield result
 
-# Creazione dell'istanza Gemini
-gemini_instance = google.generativeai.GenerativeModel(
-    model_name=gemini_model,
-    system_instruction=gemini_system
+def stream_claude(prompt):
+    result = claude.messages.stream(
+        model="claude-3-haiku-20240307",
+        max_tokens=1000,
+        temperature=0.7,
+        system=system_message,
+        messages=[
+            {"role": "user", "content": prompt},
+        ],
+    )
+    response = ""
+    with result as stream:
+        for text in stream.text_stream:
+            response += text or ""
+            yield response
+
+def stream_gemini(prompt):
+    # CORREZIONE: Passa il nome del modello come argomento diretto, non con "model="
+    model = genai.GenerativeModel("gemini-2.5-flash") 
+    
+    stream = model.generate_content(prompt, stream=True)
+    
+    result = ""
+    for chunk in stream:
+        if chunk.text:
+            result += chunk.text
+            yield result
+
+def stream_model(prompt, model):
+    if model == "GPT":
+        result = stream_gpt(prompt)
+    elif model == "Claude":
+        result = stream_claude(prompt)
+    elif model == "Gemini":
+        result = stream_gemini(prompt)
+    else:
+        raise ValueError("Unknown model")
+    yield from result
+
+# Interfaccia Gradio
+view = gr.Interface(
+    fn=stream_model,
+    inputs=[
+        gr.Textbox(label="Tu mensaje:"),
+        gr.Dropdown(["GPT", "Claude", "Gemini"], label="Selecciona un modello:", value="GPT")
+    ],
+    outputs=[gr.Markdown(label="Respuesta:")],
+    flagging_mode="never"
 )
 
-# Inizializzazione dei messaggi di partenza
-gpt_messages = ["Ciao a tutti!"]
-claude_messages = ["Ciao ragazzi"]
-gemini_messages = ["Hello, guys"]
-
-# Nomi dei bot
-gpt_name = "Alberto"
-claude_name = "Antonio"
-gemini_name = "Frank"
-
-# Funzione per costruire il messaggio che unisce le risposte di due bot
-def construct_joined_user_msg(msg1, msg1_name, msg2, msg2_name):
-    return f"{msg1_name} ha detto: {msg1}. \n\nPoi {msg2_name} ha detto: {msg2}."
-
-# Funzione per chiamare il modello GPT-4o-mini
-def call_gpt():
-    messages = [{"role": "system", "content": gpt_system}]
-    
-    # Aggiungi i messaggi dei bot alle conversazioni
-    for gpt, claude, gemini in zip(gpt_messages, claude_messages, gemini_messages):
-        messages.append({"role": "assistant", "content": gpt})
-        messages.append({"role": "user", "content": construct_joined_user_msg(claude, claude_name, gemini, gemini_name)})
-    
-    # Esegui la richiesta API a OpenAI
-    completion = openai.chat.completions.create(
-        model=gpt_model,
-        messages=messages
-    )
-    return completion.choices[0].message.content
-
-# Funzione per chiamare il modello Claude
-def call_claude():
-    messages = []
-    
-    # Aggiungi i messaggi dei bot alle conversazioni
-    for gpt, claude_msg, gemini in zip(gpt_messages, claude_messages, gemini_messages):
-        messages.append({"role": "user", "content": construct_joined_user_msg(gemini, gemini_name, gpt, gpt_name)})
-        messages.append({"role": "assistant", "content": claude_msg})
-    
-    # Aggiungi il messaggio finale di GPT
-    messages.append({"role": "user", "content": f"{gpt_name} ha detto {gpt_messages[-1]}"})
-    
-    # Esegui la richiesta API a Anthropic (Claude)
-    message = claude.messages.create(
-        model=claude_model,
-        system=claude_system,
-        messages=messages,
-        max_tokens=500
-    )
-    return message.content[0].text
-
-# Funzione per chiamare il modello Gemini
-def call_gemini():
-    messages = []
-    
-    # Aggiungi i messaggi dei bot alle conversazioni
-    for gpt, claude, gemini in zip(gpt_messages, claude_messages, gemini_messages):
-        messages.append({"role": "user", "parts": construct_joined_user_msg(gpt, gpt_name, claude, claude_name)})
-        messages.append({"role": "model", "parts": gemini})
-    
-    # Aggiungi il messaggio finale di GPT e Claude
-    messages.append({"role": "user", "parts": construct_joined_user_msg(gpt_messages[-1], gpt_name, claude_messages[-1], claude_name)})
-    
-    # Esegui la richiesta API a Gemini
-    message = gemini_instance.generate_content(messages)
-    return message.text
-
-# Ciclo delle interazioni tra i bot
-for i in range(5):  # Numero di cicli di interazione
-    print(f"\nCiclo {i+1}:")
-    
-    # Chiamate ai modelli per ottenere la risposta successiva
-    gpt_next = call_gpt()
-    print(f"{gpt_name} (GPT-4o-mini):\n{gpt_next}\n")
-    gpt_messages.append(gpt_next)
-    
-    claude_next = call_claude()
-    print(f"{claude_name} (Claude):\n{claude_next}\n")
-    claude_messages.append(claude_next)
-
-    gemini_next = call_gemini()
-    print(f"{gemini_name} (Gemini):\n{gemini_next}\n")
-    gemini_messages.append(gemini_next)
+view.launch()
